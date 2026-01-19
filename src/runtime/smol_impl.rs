@@ -18,6 +18,12 @@ impl AsyncUdpSocket for UdpSocket {
         Async::new(socket).map(UdpSocket)
     }
 
+    /// Connect the socket to a remote address.
+    ///
+    /// **Note**: This `connect` implementation is effectively synchronous and may block
+    /// briefly. Other runtime implementations (e.g., async-std, tokio) perform this
+    /// operation asynchronously. The method signature is async for API compatibility,
+    /// but the underlying operation is synchronous in the smol runtime.
     async fn connect(&self, addr: &str) -> io::Result<()> {
         self.0.get_ref().connect(addr)
     }
@@ -76,10 +82,19 @@ impl<T> Future for SmolJoinHandle<T> {
 }
 
 impl<T: Send + 'static> SmolJoinHandle<T> {
-    /// Cancel the task.
+    /// Attempt to cancel the task.
     ///
-    /// Note: smol's Task is cancelled when dropped, but this method
-    /// provides an explicit way to signal cancellation intent.
+    /// **Important**: On the smol runtime, this method is a **no-op**. The smol
+    /// Task does not support explicit abortion. Tasks are cancelled when the
+    /// `SmolJoinHandle` is dropped. This creates a behavioral inconsistency with
+    /// the tokio runtime, where `abort()` immediately cancels the task.
+    ///
+    /// For code that must reliably cancel tasks across all runtimes, consider using
+    /// alternative cancellation patterns such as:
+    /// - Cooperative cancellation with channels or atomic flags
+    /// - Wrapping tasks with `select!` and a cancellation signal
+    /// - Designing tasks to complete quickly or check for cancellation signals
+    /// - Dropping the `SmolJoinHandle` to trigger cancellation
     pub fn abort(&self) {
         // smol doesn't have an explicit abort - tasks are cancelled when dropped
         // This is a no-op for API compatibility

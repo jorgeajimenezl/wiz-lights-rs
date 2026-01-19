@@ -72,10 +72,18 @@ impl<T> Future for AsyncStdJoinHandle<T> {
 }
 
 impl<T: Send + 'static> AsyncStdJoinHandle<T> {
-    /// Cancel the task.
+    /// Attempt to cancel the task.
     ///
-    /// Note: async-std JoinHandle doesn't have abort, so this is a no-op.
-    /// The task will continue running until it completes.
+    /// **Important**: On the async-std runtime, this method is a **no-op**. The async-std
+    /// JoinHandle does not support task abortion. The task will continue running until it
+    /// completes naturally. This creates a behavioral inconsistency with the tokio runtime,
+    /// where `abort()` immediately cancels the task.
+    ///
+    /// For code that must reliably cancel tasks across all runtimes, consider using
+    /// alternative cancellation patterns such as:
+    /// - Cooperative cancellation with channels or atomic flags
+    /// - Wrapping tasks with `select!` and a cancellation signal
+    /// - Designing tasks to complete quickly or check for cancellation signals
     pub fn abort(&self) {
         // async-std doesn't support task abortion directly
         // The task will be dropped when this handle is dropped
