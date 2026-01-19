@@ -22,7 +22,9 @@ impl Ratio {
 
     /// Create a new Ratio with the default value (50 = balanced).
     pub fn new() -> Self {
-        Ratio { value: Self::DEFAULT }
+        Ratio {
+            value: Self::DEFAULT,
+        }
     }
 
     /// Get the ratio value.

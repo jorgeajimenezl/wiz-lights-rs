@@ -60,7 +60,12 @@ pub struct ColorRGBW {
 
 impl ColorRGBW {
     pub fn new(red: u8, green: u8, blue: u8, warm: u8) -> Self {
-        Self { red, green, blue, warm }
+        Self {
+            red,
+            green,
+            blue,
+            warm,
+        }
     }
 
     pub fn to_rgb(&self) -> Color {
@@ -93,7 +98,13 @@ pub struct ColorRGBWW {
 
 impl ColorRGBWW {
     pub fn new(red: u8, green: u8, blue: u8, cool: u8, warm: u8) -> Self {
-        Self { red, green, blue, cool, warm }
+        Self {
+            red,
+            green,
+            blue,
+            cool,
+            warm,
+        }
     }
 
     pub fn to_rgb(&self) -> Color {

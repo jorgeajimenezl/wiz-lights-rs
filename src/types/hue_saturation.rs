@@ -95,11 +95,7 @@ impl HueSaturation {
             _ => (v, p, q),
         };
 
-        Color::rgb(
-            (r * 255.0) as u8,
-            (g * 255.0) as u8,
-            (b * 255.0) as u8,
-        )
+        Color::rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
     }
 }
 

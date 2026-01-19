@@ -58,7 +58,10 @@ impl MessageHistory {
     }
 
     pub fn with_max_entries(max_entries: usize) -> Self {
-        Self { max_entries, ..Self::new() }
+        Self {
+            max_entries,
+            ..Self::new()
+        }
     }
 
     pub fn record(&mut self, msg_type: MessageType, message: &Value) {
@@ -138,7 +141,10 @@ mod tests {
     #[test]
     fn test_record_message() {
         let mut history = MessageHistory::new();
-        history.record(MessageType::Send, &json!({"method": "setPilot", "params": {"state": true}}));
+        history.record(
+            MessageType::Send,
+            &json!({"method": "setPilot", "params": {"state": true}}),
+        );
 
         assert_eq!(history.len(), 1);
     }
@@ -154,7 +160,10 @@ mod tests {
     fn test_max_entries() {
         let mut history = MessageHistory::with_max_entries(2);
         for i in 0..5 {
-            history.record(MessageType::Send, &json!({"method": format!("method{}", i)}));
+            history.record(
+                MessageType::Send,
+                &json!({"method": format!("method{}", i)}),
+            );
         }
         assert_eq!(history.len(), 2);
     }
