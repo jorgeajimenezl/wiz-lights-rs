@@ -30,3 +30,4 @@ async-lock = { version = "3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["net", "time", "rt", "rt-multi-thread", "sync", "macros"] }
+clap = { version = "4", features = ["derive"] }
