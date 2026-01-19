@@ -7,7 +7,7 @@
 //! Run with: cargo run --example discover_and_set_red
 
 use std::time::Duration;
-use wiz_lights_rs::{discover_bulbs, Color, Payload};
+use wiz_lights_rs::{Color, Payload, discover_bulbs};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

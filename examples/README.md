@@ -26,6 +26,10 @@ A full-featured command-line interface for controlling Wiz lights.
 # Get help
 cargo run --example wiz_cli -- --help
 
+# Discover all lights on the network
+cargo run --example wiz_cli -- discover
+cargo run --example wiz_cli -- discover --timeout 10  # Custom timeout
+
 # Get status of a light
 cargo run --example wiz_cli -- --ip 192.168.1.100 status
 
