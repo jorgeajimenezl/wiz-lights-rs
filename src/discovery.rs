@@ -5,11 +5,10 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::net::UdpSocket;
-use tokio::time::{Instant, timeout};
 
 use crate::errors::Error;
 use crate::light::Light;
+use crate::runtime::{self, AsyncUdpSocket, Instant, UdpSocket};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -90,8 +89,8 @@ pub async fn discover_bulbs(discovery_timeout: Duration) -> Result<Vec<Discovere
     let recv_timeout = Duration::from_millis(500);
 
     while start.elapsed() < discovery_timeout {
-        // Use timeout for each recv_from operation
-        match timeout(recv_timeout, socket.recv_from(&mut buffer)).await {
+        // Use runtime-agnostic timeout for each recv_from operation
+        match runtime::timeout(recv_timeout, socket.recv_from(&mut buffer)).await {
             Ok(Ok((size, addr))) => {
                 if let Ok(response) = String::from_utf8(buffer[..size].to_vec())
                     && let Ok(json) = serde_json::from_str::<Value>(&response)
