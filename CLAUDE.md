@@ -5,7 +5,6 @@
 **wiz-lights-rs** is a Rust library for controlling Philips Wiz smart lights over UDP. It provides a comprehensive API to communicate with Wiz smart bulbs on local networks, supporting colors, brightness, color temperature, scenes, power states, and fan control for fan-equipped fixtures.
 
 - **Language**: Rust (Edition 2024)
-- **Version**: 0.1.0
 - **Protocol**: UDP on ports 38899 (commands) and 38900 (push notifications)
 - **Message Format**: JSON
 
@@ -240,17 +239,3 @@ let brightness = Brightness::create_or(5, 10);  // Brightness(10)
 3. **Don't ignore socket errors** - Handle all network failures gracefully
 4. **Don't block on push listener** - It runs in a separate thread
 5. **Don't assume all bulbs have all features** - Check `BulbType.features` first
-
-## File Size Reference
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| light.rs | ~520 | Core light control |
-| payload.rs | ~400 | Command builder |
-| status.rs | ~270 | Status tracking |
-| room.rs | ~240 | Room grouping |
-| push.rs | ~230 | Push notifications |
-| history.rs | ~160 | Message history |
-| config.rs | ~150 | Bulb configuration |
-| errors.rs | ~100 | Error types |
-| types/* | ~560 | Type definitions |
