@@ -8,6 +8,7 @@ rust-version = "1.85"
 default = ["runtime-tokio"]
 runtime-tokio = ["dep:tokio"]
 runtime-async-std = ["dep:async-std"]
+runtime-smol = ["dep:smol", "dep:async-io", "dep:async-lock"]
 
 [dependencies]
 futures = "0.3"
@@ -23,6 +24,9 @@ thiserror = "2.0.18"
 # Runtime dependencies (select one via features)
 tokio = { version = "1", features = ["net", "time", "rt", "rt-multi-thread", "sync", "macros"], optional = true }
 async-std = { version = "1.12", features = ["attributes"], optional = true }
+smol = { version = "2", optional = true }
+async-io = { version = "2", optional = true }
+async-lock = { version = "3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["net", "time", "rt", "rt-multi-thread", "sync", "macros"] }

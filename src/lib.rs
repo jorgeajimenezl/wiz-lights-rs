@@ -28,7 +28,7 @@
 //!
 //! ## Features
 //!
-//! - **Runtime Agnostic**: Works with tokio, async-std, or other async runtimes
+//! - **Runtime Agnostic**: Works with tokio, async-std, or smol async runtimes
 //! - **RGB Colors**: Set any RGB color using the [`Color`] type
 //! - **Brightness**: Control brightness from 10-100% using [`Brightness`]
 //! - **Color Temperature**: Set warm to cool white (1000K-8000K) using [`Kelvin`]
@@ -64,10 +64,19 @@
 //! async-std = { version = "1.12", features = ["attributes"] }
 //! ```
 //!
+//! ### Using smol
+//!
+//! ```toml
+//! [dependencies]
+//! wiz-lights-rs = { version = "0.1", default-features = false, features = ["runtime-smol"] }
+//! smol = "2"
+//! ```
+//!
 //! ## Feature Flags
 //!
 //! - `runtime-tokio` (default): Use the tokio async runtime
 //! - `runtime-async-std`: Use the async-std runtime
+//! - `runtime-smol`: Use the smol runtime
 
 mod config;
 mod discovery;

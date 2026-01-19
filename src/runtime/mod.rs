@@ -1,7 +1,7 @@
 //! Runtime-agnostic async abstractions.
 //!
 //! This module provides traits and implementations that allow the library to work
-//! with any async runtime (tokio, async-std, smol, etc.).
+//! with any async runtime (tokio, async-std, smol).
 //!
 //! # Feature Flags
 //!
@@ -9,12 +9,17 @@
 //!
 //! - `runtime-tokio` (default) - Use the tokio runtime
 //! - `runtime-async-std` - Use the async-std runtime
+//! - `runtime-smol` - Use the smol runtime
 //!
 //! # Example
 //!
 //! ```toml
 //! [dependencies]
+//! # Using async-std
 //! wiz-lights-rs = { version = "0.1", default-features = false, features = ["runtime-async-std"] }
+//!
+//! # Using smol
+//! wiz-lights-rs = { version = "0.1", default-features = false, features = ["runtime-smol"] }
 //! ```
 
 use std::future::Future;
@@ -29,12 +34,18 @@ mod tokio_impl;
 #[cfg(feature = "runtime-async-std")]
 mod async_std_impl;
 
+#[cfg(feature = "runtime-smol")]
+mod smol_impl;
+
 // Re-export the active runtime's types
 #[cfg(feature = "runtime-tokio")]
 pub use tokio_impl::*;
 
 #[cfg(feature = "runtime-async-std")]
 pub use async_std_impl::*;
+
+#[cfg(feature = "runtime-smol")]
+pub use smol_impl::*;
 
 /// A boxed future type for runtime abstraction.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -133,6 +144,9 @@ pub use tokio::sync::Mutex;
 #[cfg(feature = "runtime-async-std")]
 pub use async_std::sync::Mutex;
 
+#[cfg(feature = "runtime-smol")]
+pub use async_lock::Mutex;
+
 // JoinHandle type alias for task spawning
 #[cfg(feature = "runtime-tokio")]
 pub type JoinHandle<T> = tokio_impl::TokioJoinHandle<T>;
@@ -140,9 +154,24 @@ pub type JoinHandle<T> = tokio_impl::TokioJoinHandle<T>;
 #[cfg(feature = "runtime-async-std")]
 pub type JoinHandle<T> = async_std_impl::AsyncStdJoinHandle<T>;
 
+#[cfg(feature = "runtime-smol")]
+pub type JoinHandle<T> = smol_impl::SmolJoinHandle<T>;
+
 // Compile-time check to ensure exactly one runtime is selected
-#[cfg(not(any(feature = "runtime-tokio", feature = "runtime-async-std")))]
-compile_error!("Either feature \"runtime-tokio\" or \"runtime-async-std\" must be enabled");
+#[cfg(not(any(
+    feature = "runtime-tokio",
+    feature = "runtime-async-std",
+    feature = "runtime-smol"
+)))]
+compile_error!(
+    "One of \"runtime-tokio\", \"runtime-async-std\", or \"runtime-smol\" features must be enabled"
+);
 
 #[cfg(all(feature = "runtime-tokio", feature = "runtime-async-std"))]
 compile_error!("Features \"runtime-tokio\" and \"runtime-async-std\" are mutually exclusive");
+
+#[cfg(all(feature = "runtime-tokio", feature = "runtime-smol"))]
+compile_error!("Features \"runtime-tokio\" and \"runtime-smol\" are mutually exclusive");
+
+#[cfg(all(feature = "runtime-async-std", feature = "runtime-smol"))]
+compile_error!("Features \"runtime-async-std\" and \"runtime-smol\" are mutually exclusive");

@@ -51,13 +51,13 @@ impl Clone for Light {
         // This requires blocking to read the current history, which is acceptable for clone.
         // Note: try_lock API differs between runtimes:
         // - tokio returns Result<Guard, TryLockError>
-        // - async-std returns Option<Guard>
+        // - async-std and async-lock (smol) return Option<Guard>
         #[cfg(feature = "runtime-tokio")]
         let history_clone = match self.history.try_lock() {
             Ok(guard) => guard.clone(),
             Err(_) => MessageHistory::new(), // If locked, start fresh
         };
-        #[cfg(feature = "runtime-async-std")]
+        #[cfg(any(feature = "runtime-async-std", feature = "runtime-smol"))]
         let history_clone = match self.history.try_lock() {
             Some(guard) => guard.clone(),
             None => MessageHistory::new(), // If locked, start fresh
