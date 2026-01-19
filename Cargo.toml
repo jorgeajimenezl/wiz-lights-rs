@@ -4,8 +4,14 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 
+[features]
+default = ["runtime-tokio"]
+runtime-tokio = ["dep:tokio"]
+runtime-async-std = ["dep:async-std"]
+runtime-smol = ["dep:smol", "dep:async-io", "dep:async-lock", "dep:futures"]
+
 [dependencies]
-futures = "0.3"
+futures = { version = "0.3", optional = true }
 log = "0.4.29"
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
@@ -14,4 +20,13 @@ serde_with = "3.16.1"
 strum = "0.25"
 strum_macros = "0.25"
 thiserror = "2.0.18"
+
+# Runtime dependencies (select one via features)
+tokio = { version = "1", features = ["net", "time", "rt", "rt-multi-thread", "sync", "macros"], optional = true }
+async-std = { version = "1.12", features = ["attributes"], optional = true }
+smol = { version = "2", optional = true }
+async-io = { version = "2", optional = true }
+async-lock = { version = "3", optional = true }
+
+[dev-dependencies]
 tokio = { version = "1", features = ["net", "time", "rt", "rt-multi-thread", "sync", "macros"] }

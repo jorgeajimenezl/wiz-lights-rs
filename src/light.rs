@@ -7,9 +7,8 @@ use std::time::Duration;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+
+use crate::runtime::{self, AsyncUdpSocket, Mutex, UdpSocket};
 
 use crate::config::{BulbType, ExtendedWhiteRange, SystemConfig, SystemConfigResponse, WhiteRange};
 use crate::errors::Error;
@@ -50,9 +49,18 @@ impl Clone for Light {
     fn clone(&self) -> Self {
         // For cloning, we create a new history mutex with a clone of the history data.
         // This requires blocking to read the current history, which is acceptable for clone.
+        // Note: try_lock API differs between runtimes:
+        // - tokio returns Result<Guard, TryLockError>
+        // - async-std and async-lock (smol) return Option<Guard>
+        #[cfg(feature = "runtime-tokio")]
         let history_clone = match self.history.try_lock() {
             Ok(guard) => guard.clone(),
             Err(_) => MessageHistory::new(), // If locked, start fresh
+        };
+        #[cfg(any(feature = "runtime-async-std", feature = "runtime-smol"))]
+        let history_clone = match self.history.try_lock() {
+            Some(guard) => guard.clone(),
+            None => MessageHistory::new(), // If locked, start fresh
         };
         Light {
             ip: self.ip,
@@ -503,7 +511,8 @@ impl Light {
                     last_error = Some(e);
                     if attempt < Self::MAX_RETRIES {
                         let delay_idx = (attempt as usize).min(Self::RETRY_DELAYS_MS.len() - 1);
-                        sleep(Duration::from_millis(Self::RETRY_DELAYS_MS[delay_idx])).await;
+                        runtime::sleep(Duration::from_millis(Self::RETRY_DELAYS_MS[delay_idx]))
+                            .await;
                     }
                 }
             }
@@ -518,7 +527,7 @@ impl Light {
             .map_err(|e| Error::socket("bind", e))?;
 
         socket
-            .connect(format!("{}:{}", self.ip, Self::PORT))
+            .connect(&format!("{}:{}", self.ip, Self::PORT))
             .await
             .map_err(|e| Error::socket("connect", e))?;
 
@@ -529,8 +538,8 @@ impl Light {
 
         let mut buffer = [0u8; 4096];
 
-        // Use tokio's timeout for the receive operation
-        let bytes = tokio::time::timeout(
+        // Use runtime-agnostic timeout for the receive operation
+        let bytes = runtime::timeout(
             Duration::from_millis(Self::TIMEOUT_MS),
             socket.recv(&mut buffer),
         )

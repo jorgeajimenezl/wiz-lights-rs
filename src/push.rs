@@ -9,13 +9,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
-use tokio::time::{Instant, timeout};
 
 use crate::discovery::DiscoveredBulb;
 use crate::errors::Error;
+use crate::runtime::{self, AsyncUdpSocket, Instant, JoinHandle, Mutex, UdpSocket};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -155,7 +152,7 @@ impl PushManager {
             return Ok(());
         }
 
-        let socket = UdpSocket::bind(format!("0.0.0.0:{LISTEN_PORT}"))
+        let socket = UdpSocket::bind(&format!("0.0.0.0:{LISTEN_PORT}"))
             .await
             .map_err(|e| Error::socket("bind push socket", e))?;
 
@@ -176,12 +173,12 @@ impl PushManager {
         let last_push = Arc::clone(&self.last_push);
         let last_error = Arc::clone(&self.last_error);
 
-        let handle = tokio::spawn(async move {
+        let handle = runtime::spawn(async move {
             let mut buffer = [0u8; 4096];
             let recv_timeout = Duration::from_millis(500);
 
             while running.load(Ordering::SeqCst) {
-                match timeout(recv_timeout, socket.recv_from(&mut buffer)).await {
+                match runtime::timeout(recv_timeout, socket.recv_from(&mut buffer)).await {
                     Ok(Ok((size, addr))) => {
                         *last_push.lock().await = Some(Instant::now());
 
@@ -280,10 +277,10 @@ impl PushManager {
 
         let msg_bytes = serde_json::to_vec(&reg_msg).map_err(Error::JsonDump)?;
 
-        // Use timeout for the send operation
-        timeout(
+        // Use runtime-agnostic timeout for the send operation
+        runtime::timeout(
             Duration::from_secs(2),
-            socket.send_to(&msg_bytes, format!("{bulb_ip}:{RESPOND_PORT}")),
+            socket.send_to(&msg_bytes, &format!("{bulb_ip}:{RESPOND_PORT}")),
         )
         .await
         .map_err(|_| {

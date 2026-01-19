@@ -2,7 +2,7 @@
 //!
 //! An async Rust library for controlling Philips Wiz smart lights over UDP.
 //!
-//! This crate provides an async API (using tokio) to communicate with Wiz smart bulbs
+//! This crate provides a **runtime-agnostic** async API to communicate with Wiz smart bulbs
 //! on your local network. It supports setting colors, brightness, color temperature,
 //! scenes, and power states.
 //!
@@ -13,8 +13,8 @@
 //! use std::str::FromStr;
 //! use wiz_lights_rs::{Light, Payload, Color};
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Works with any async runtime!
+//! async fn control_light() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create a light instance with the bulb's IP address
 //!     let light = Light::new(Ipv4Addr::from_str("192.168.1.100")?, Some("Living Room"));
 //!
@@ -28,7 +28,7 @@
 //!
 //! ## Features
 //!
-//! - **Async/Await**: All network operations are async using tokio
+//! - **Runtime Agnostic**: Works with tokio, async-std, or smol async runtimes
 //! - **RGB Colors**: Set any RGB color using the [`Color`] type
 //! - **Brightness**: Control brightness from 10-100% using [`Brightness`]
 //! - **Color Temperature**: Set warm to cool white (1000K-8000K) using [`Kelvin`]
@@ -44,14 +44,39 @@
 //! All communication with Wiz bulbs occurs over UDP on port 38899. The bulbs must
 //! be on the same local network and ideally have static IP addresses assigned.
 //!
-//! ## Runtime Requirements
+//! ## Runtime Selection
 //!
-//! This library requires the tokio async runtime. Add tokio to your dependencies:
+//! This library is runtime-agnostic. Select your preferred runtime using feature flags:
+//!
+//! ### Using tokio (default)
 //!
 //! ```toml
 //! [dependencies]
+//! wiz-lights-rs = "0.1"
 //! tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 //! ```
+//!
+//! ### Using async-std
+//!
+//! ```toml
+//! [dependencies]
+//! wiz-lights-rs = { version = "0.1", default-features = false, features = ["runtime-async-std"] }
+//! async-std = { version = "1.12", features = ["attributes"] }
+//! ```
+//!
+//! ### Using smol
+//!
+//! ```toml
+//! [dependencies]
+//! wiz-lights-rs = { version = "0.1", default-features = false, features = ["runtime-smol"] }
+//! smol = "2"
+//! ```
+//!
+//! ## Feature Flags
+//!
+//! - `runtime-tokio` (default): Use the tokio async runtime
+//! - `runtime-async-std`: Use the async-std runtime
+//! - `runtime-smol`: Use the smol runtime
 
 mod config;
 mod discovery;
@@ -62,6 +87,7 @@ mod payload;
 pub mod push;
 mod response;
 mod room;
+pub mod runtime;
 mod status;
 mod types;
 

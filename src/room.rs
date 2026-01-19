@@ -81,7 +81,10 @@ impl Room {
             .values()
             .map(|light| async move {
                 let ip = light.ip();
-                light.get_status().await.map(|status| LightingResponse::status(ip, status))
+                light
+                    .get_status()
+                    .await
+                    .map(|status| LightingResponse::status(ip, status))
             })
             .collect();
 
