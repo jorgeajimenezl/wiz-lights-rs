@@ -27,7 +27,9 @@ impl Speed {
     /// assert_eq!(Speed::new().value(), 100);
     /// ```
     pub fn new() -> Self {
-        Speed { value: Self::DEFAULT }
+        Speed {
+            value: Self::DEFAULT,
+        }
     }
 
     /// Get the speed value.

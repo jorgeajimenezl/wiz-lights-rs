@@ -32,11 +32,11 @@ pub(crate) struct SystemConfigResponse {
 /// Classification of Wiz bulb types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BulbClass {
-    TW,      // Tunable White
-    DW,      // Dimmable White
-    RGB,     // Full color
-    Socket,  // Smart socket
-    FanDim,  // Fan with dimmable light
+    TW,     // Tunable White
+    DW,     // Dimmable White
+    RGB,    // Full color
+    Socket, // Smart socket
+    FanDim, // Fan with dimmable light
 }
 
 /// Feature flags for a Wiz bulb.
@@ -100,7 +100,10 @@ impl BulbType {
         let parts: Vec<&str> = module_name.split('_').collect();
         let mut features = Features::default();
         let mut bulb_class = BulbClass::DW;
-        let mut kelvin_range = KelvinRange { min: 2700, max: 6500 };
+        let mut kelvin_range = KelvinRange {
+            min: 2700,
+            max: 6500,
+        };
         let mut white_channels = 0u8;
 
         if let Some(type_part) = parts.get(1) {
@@ -113,7 +116,10 @@ impl BulbType {
                 features.effect = true;
                 features.brightness = true;
                 white_channels = 2;
-                kelvin_range = KelvinRange { min: 2200, max: 6500 };
+                kelvin_range = KelvinRange {
+                    min: 2200,
+                    max: 6500,
+                };
             } else if type_part.contains("TW") {
                 bulb_class = BulbClass::TW;
                 features.color_tmp = true;

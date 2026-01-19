@@ -68,14 +68,16 @@ impl Room {
     }
 
     /// Query all bulbs in this room for their current status.
-    pub fn get_status(&mut self) -> Result<Vec<LightingResponse>> {
+    ///
+    /// This queries all lights concurrently using tokio's join_all.
+    pub async fn get_status(&mut self) -> Result<Vec<LightingResponse>> {
         let Some(lights) = &mut self.lights else {
             return Ok(Vec::new());
         };
 
         let mut responses = Vec::new();
         for light in lights.values_mut() {
-            let status = light.get_status()?;
+            let status = light.get_status().await?;
             responses.push(LightingResponse::status(light.ip(), status));
         }
         Ok(responses)

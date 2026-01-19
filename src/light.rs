@@ -1,12 +1,15 @@
 //! Individual light control.
 
-use std::cell::RefCell;
-use std::net::{Ipv4Addr, UdpSocket};
+use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use log::debug;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 use crate::config::{BulbType, ExtendedWhiteRange, SystemConfig, SystemConfigResponse, WhiteRange};
 use crate::errors::Error;
@@ -40,16 +43,22 @@ pub struct Light {
     name: Option<String>,
     status: Option<LightStatus>,
     #[serde(skip)]
-    history: RefCell<MessageHistory>,
+    history: Arc<Mutex<MessageHistory>>,
 }
 
 impl Clone for Light {
     fn clone(&self) -> Self {
+        // For cloning, we create a new history mutex with a clone of the history data.
+        // This requires blocking to read the current history, which is acceptable for clone.
+        let history_clone = match self.history.try_lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => MessageHistory::new(), // If locked, start fresh
+        };
         Light {
             ip: self.ip,
             name: self.name.clone(),
             status: self.status.clone(),
-            history: RefCell::new(self.history.borrow().clone()),
+            history: Arc::new(Mutex::new(history_clone)),
         }
     }
 }
@@ -66,7 +75,7 @@ impl Light {
             ip,
             name: name.map(String::from),
             status: None,
-            history: RefCell::new(MessageHistory::new()),
+            history: Arc::new(Mutex::new(MessageHistory::new())),
         }
     }
 
@@ -86,20 +95,22 @@ impl Light {
     }
 
     /// Get a copy of the message history for this light.
-    pub fn history(&self) -> MessageHistory {
-        self.history.borrow().clone()
+    ///
+    /// This is an async operation because the history is protected by a mutex.
+    pub async fn history(&self) -> MessageHistory {
+        self.history.lock().await.clone()
     }
 
     /// Clear the message history.
-    pub fn clear_history(&self) {
-        self.history.borrow_mut().clear();
+    pub async fn clear_history(&self) {
+        self.history.lock().await.clear();
     }
 
     /// Get diagnostics information for this light.
     ///
     /// Returns a JSON value containing current state, configuration,
     /// and history information useful for debugging.
-    pub fn diagnostics(&self) -> Value {
+    pub async fn diagnostics(&self) -> Value {
         let mut diag = json!({
             "ip": self.ip.to_string(),
             "name": self.name,
@@ -113,11 +124,12 @@ impl Light {
         });
 
         // Add history summary
-        let history = self.history.borrow();
+        let history = self.history.lock().await;
         diag["history"] = serde_json::to_value(history.summary()).unwrap_or(Value::Null);
+        drop(history); // Release lock before network operations
 
         // Try to add configuration info (may fail if device is unreachable)
-        if let Ok(config) = self.get_system_config() {
+        if let Ok(config) = self.get_system_config().await {
             diag["system_config"] = json!({
                 "mac": config.mac,
                 "module_name": config.module_name,
@@ -127,19 +139,19 @@ impl Light {
             });
         }
 
-        if let Ok(Some(white_range)) = self.get_white_range() {
+        if let Ok(Some(white_range)) = self.get_white_range().await {
             diag["white_range"] = json!(white_range.values);
         }
 
-        if let Ok(Some(ext_range)) = self.get_extended_white_range() {
+        if let Ok(Some(ext_range)) = self.get_extended_white_range().await {
             diag["extended_white_range"] = json!(ext_range.values);
         }
 
-        if let Ok(Some(fan_range)) = self.get_fan_speed_range() {
+        if let Ok(Some(fan_range)) = self.get_fan_speed_range().await {
             diag["fan_speed_range"] = json!(fan_range);
         }
 
-        if let Ok(bulb_type) = self.get_bulb_type() {
+        if let Ok(bulb_type) = self.get_bulb_type().await {
             diag["bulb_type"] = json!({
                 "name": bulb_type.name,
                 "class": format!("{:?}", bulb_type.bulb_class),
@@ -165,8 +177,8 @@ impl Light {
     ///
     /// This performs a live network query, unlike [`status()`](Self::status)
     /// which returns cached data.
-    pub fn get_status(&self) -> Result<LightStatus> {
-        let resp = self.send_command(&json!({"method": "getPilot"}))?;
+    pub async fn get_status(&self) -> Result<LightStatus> {
+        let resp = self.send_command(&json!({"method": "getPilot"})).await?;
         let status: BulbStatus = serde_json::from_value(resp).map_err(Error::JsonLoad)?;
         Ok(LightStatus::from(&status))
     }
@@ -175,55 +187,57 @@ impl Light {
     ///
     /// Returns a response that can be passed to [`process_reply`](Self::process_reply)
     /// to update the cached state.
-    pub fn set(&self, payload: &Payload) -> Result<LightingResponse> {
+    pub async fn set(&self, payload: &Payload) -> Result<LightingResponse> {
         if !payload.is_valid() {
             return Err(Error::NoAttribute);
         }
 
         let msg = serde_json::to_value(payload).map_err(Error::JsonDump)?;
-        let response = self.send_command(&json!({
-            "method": "setPilot",
-            "params": msg,
-        }))?;
+        let response = self
+            .send_command(&json!({
+                "method": "setPilot",
+                "params": msg,
+            }))
+            .await?;
 
         debug!("UDP response: {:?}", response);
         Ok(LightingResponse::payload(self.ip, payload.clone()))
     }
 
     /// Set the power state of this light.
-    pub fn set_power(&self, power: &PowerMode) -> Result<LightingResponse> {
+    pub async fn set_power(&self, power: &PowerMode) -> Result<LightingResponse> {
         match power {
-            PowerMode::On => self.set_power_state(true),
-            PowerMode::Off => self.set_power_state(false),
-            PowerMode::Reboot => self.reboot_bulb(),
+            PowerMode::On => self.set_power_state(true).await,
+            PowerMode::Off => self.set_power_state(false).await,
+            PowerMode::Reboot => self.reboot_bulb().await,
         }
     }
 
     /// Toggle the light on/off.
     ///
     /// Queries current state and switches to the opposite.
-    pub fn toggle(&self) -> Result<LightingResponse> {
-        let status = self.get_status()?;
+    pub async fn toggle(&self) -> Result<LightingResponse> {
+        let status = self.get_status().await?;
         if status.emitting() {
-            self.set_power(&PowerMode::Off)
+            self.set_power(&PowerMode::Off).await
         } else {
-            self.set_power(&PowerMode::On)
+            self.set_power(&PowerMode::On).await
         }
     }
 
     /// Factory reset the bulb.
     ///
     /// **Warning**: This resets all settings including WiFi configuration.
-    pub fn reset(&self) -> Result<()> {
-        self.send_command(&json!({"method": "reset"}))?;
+    pub async fn reset(&self) -> Result<()> {
+        self.send_command(&json!({"method": "reset"})).await?;
         Ok(())
     }
 
     /// Get the current power consumption in watts.
     ///
     /// Not all bulbs support this feature.
-    pub fn get_power(&self) -> Result<Option<f32>> {
-        let resp = self.send_command(&json!({"method": "getPower"}))?;
+    pub async fn get_power(&self) -> Result<Option<f32>> {
+        let resp = self.send_command(&json!({"method": "getPower"})).await?;
         Ok(resp
             .get("result")
             .and_then(|r| r.get("power"))
@@ -232,48 +246,57 @@ impl Light {
     }
 
     /// Get the system configuration of the bulb.
-    pub fn get_system_config(&self) -> Result<SystemConfig> {
-        let resp = self.send_command(&json!({"method": "getSystemConfig"}))?;
-        let config: SystemConfigResponse =
-            serde_json::from_value(resp).map_err(Error::JsonLoad)?;
+    pub async fn get_system_config(&self) -> Result<SystemConfig> {
+        let resp = self
+            .send_command(&json!({"method": "getSystemConfig"}))
+            .await?;
+        let config: SystemConfigResponse = serde_json::from_value(resp).map_err(Error::JsonLoad)?;
         Ok(config.result)
     }
 
     /// Get the user configuration of the bulb.
-    pub fn get_user_config(&self) -> Result<Value> {
-        let resp = self.send_command(&json!({"method": "getUserConfig"}))?;
+    pub async fn get_user_config(&self) -> Result<Value> {
+        let resp = self
+            .send_command(&json!({"method": "getUserConfig"}))
+            .await?;
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 
     /// Get the model configuration of the bulb.
     ///
     /// Only available on firmware >= 1.22.
-    pub fn get_model_config(&self) -> Result<Value> {
-        let resp = self.send_command(&json!({"method": "getModelConfig"}))?;
+    pub async fn get_model_config(&self) -> Result<Value> {
+        let resp = self
+            .send_command(&json!({"method": "getModelConfig"}))
+            .await?;
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 
     /// Detect the bulb type and capabilities.
-    pub fn get_bulb_type(&self) -> Result<BulbType> {
-        let config = self.get_system_config()?;
+    pub async fn get_bulb_type(&self) -> Result<BulbType> {
+        let config = self.get_system_config().await?;
         let module_name = config.module_name.as_deref().unwrap_or("Unknown");
         let fw_version = config.fw_version.as_deref();
         Ok(BulbType::from_module_name(module_name, fw_version))
     }
 
     /// Get the white range from the user configuration.
-    pub fn get_white_range(&self) -> Result<Option<WhiteRange>> {
-        let config = self.get_user_config()?;
+    pub async fn get_white_range(&self) -> Result<Option<WhiteRange>> {
+        let config = self.get_user_config().await?;
         Ok(parse_f32_array(&config, "whiteRange").map(WhiteRange::new))
     }
 
     /// Get the extended white range (CCT range) from the bulb.
-    pub fn get_extended_white_range(&self) -> Result<Option<ExtendedWhiteRange>> {
+    pub async fn get_extended_white_range(&self) -> Result<Option<ExtendedWhiteRange>> {
         // Try model config first (FW >= 1.22), then user config
-        let model = self.get_model_config()?;
-        let user = self.get_user_config()?;
+        let model = self.get_model_config().await?;
+        let user = self.get_user_config().await?;
 
-        for (config, key) in [(&model, "cctRange"), (&user, "extRange"), (&user, "cctRange")] {
+        for (config, key) in [
+            (&model, "cctRange"),
+            (&user, "extRange"),
+            (&user, "cctRange"),
+        ] {
             if let Some(values) = parse_f32_array(config, key) {
                 return Ok(Some(ExtendedWhiteRange::new(values)));
             }
@@ -282,13 +305,16 @@ impl Light {
     }
 
     /// Get the fan speed range (max speed) for fan-equipped fixtures.
-    pub fn get_fan_speed_range(&self) -> Result<Option<u8>> {
-        let model = self.get_model_config()?;
+    pub async fn get_fan_speed_range(&self) -> Result<Option<u8>> {
+        let model = self.get_model_config().await?;
         if let Some(v) = model.get("fanSpeed").and_then(|v| v.as_u64()) {
             return Ok(Some(v as u8));
         }
-        let user = self.get_user_config()?;
-        Ok(user.get("fanSpeed").and_then(|v| v.as_u64()).map(|v| v as u8))
+        let user = self.get_user_config().await?;
+        Ok(user
+            .get("fanSpeed")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u8))
     }
 
     // ==================== Fan Control Methods ====================
@@ -303,7 +329,7 @@ impl Light {
     /// * `mode` - Optional fan mode (normal/breeze)
     /// * `speed` - Optional fan speed
     /// * `direction` - Optional rotation direction (forward/reverse)
-    pub fn fan_set_state(
+    pub async fn fan_set_state(
         &self,
         state: Option<FanState>,
         mode: Option<FanMode>,
@@ -329,7 +355,8 @@ impl Light {
         self.send_command(&json!({
             "method": "setPilot",
             "params": msg,
-        }))?;
+        }))
+        .await?;
 
         Ok(LightingResponse::payload(self.ip, payload))
     }
@@ -337,25 +364,27 @@ impl Light {
     /// Turn the fan on.
     ///
     /// Optionally specify mode and speed.
-    pub fn fan_turn_on(
+    pub async fn fan_turn_on(
         &self,
         mode: Option<FanMode>,
         speed: Option<FanSpeed>,
     ) -> Result<LightingResponse> {
         self.fan_set_state(Some(FanState::On), mode, speed, None)
+            .await
     }
 
     /// Turn the fan off.
-    pub fn fan_turn_off(&self) -> Result<LightingResponse> {
+    pub async fn fan_turn_off(&self) -> Result<LightingResponse> {
         self.fan_set_state(Some(FanState::Off), None, None, None)
+            .await
     }
 
     /// Toggle the fan on/off.
     ///
     /// Queries current state and switches to the opposite.
-    pub fn fan_toggle(&self) -> Result<LightingResponse> {
+    pub async fn fan_toggle(&self) -> Result<LightingResponse> {
         // Check fan state from the raw response
-        let resp = self.send_command(&json!({"method": "getPilot"}))?;
+        let resp = self.send_command(&json!({"method": "getPilot"})).await?;
         let fan_on = resp
             .get("result")
             .and_then(|r| r.get("fanState"))
@@ -364,25 +393,25 @@ impl Light {
             .unwrap_or(false);
 
         if fan_on {
-            self.fan_turn_off()
+            self.fan_turn_off().await
         } else {
-            self.fan_turn_on(None, None)
+            self.fan_turn_on(None, None).await
         }
     }
 
     /// Set the fan speed.
-    pub fn set_fan_speed(&self, speed: FanSpeed) -> Result<LightingResponse> {
-        self.fan_set_state(None, None, Some(speed), None)
+    pub async fn set_fan_speed(&self, speed: FanSpeed) -> Result<LightingResponse> {
+        self.fan_set_state(None, None, Some(speed), None).await
     }
 
     /// Set the fan mode (normal or breeze).
-    pub fn set_fan_mode(&self, mode: FanMode) -> Result<LightingResponse> {
-        self.fan_set_state(None, Some(mode), None, None)
+    pub async fn set_fan_mode(&self, mode: FanMode) -> Result<LightingResponse> {
+        self.fan_set_state(None, Some(mode), None, None).await
     }
 
     /// Set the fan rotation direction.
-    pub fn set_fan_direction(&self, direction: FanDirection) -> Result<LightingResponse> {
-        self.fan_set_state(None, None, None, Some(direction))
+    pub async fn set_fan_direction(&self, direction: FanDirection) -> Result<LightingResponse> {
+        self.fan_set_state(None, None, None, Some(direction)).await
     }
 
     /// Update the cached status from a lighting response.
@@ -415,14 +444,15 @@ impl Light {
         changed
     }
 
-    fn set_power_state(&self, on: bool) -> Result<LightingResponse> {
-        self.send_command(&json!({"method": "setState", "params": {"state": on}}))?;
+    async fn set_power_state(&self, on: bool) -> Result<LightingResponse> {
+        self.send_command(&json!({"method": "setState", "params": {"state": on}}))
+            .await?;
         let power = if on { PowerMode::On } else { PowerMode::Off };
         Ok(LightingResponse::power(self.ip, power))
     }
 
-    fn reboot_bulb(&self) -> Result<LightingResponse> {
-        self.send_command(&json!({"method": "reboot"}))?;
+    async fn reboot_bulb(&self) -> Result<LightingResponse> {
+        self.send_command(&json!({"method": "reboot"})).await?;
         Ok(LightingResponse::power(self.ip, PowerMode::Reboot))
     }
 
@@ -450,31 +480,30 @@ impl Light {
         }
     }
 
-    fn send_command(&self, msg: &Value) -> Result<Value> {
+    async fn send_command(&self, msg: &Value) -> Result<Value> {
         // Record the sent message
-        self.history.borrow_mut().record(MessageType::Send, msg);
+        self.history.lock().await.record(MessageType::Send, msg);
 
         let msg_str = serde_json::to_string(msg).map_err(Error::JsonDump)?;
         let mut last_error = None;
 
         for attempt in 0..=Self::MAX_RETRIES {
-            match self.send_udp(&msg_str) {
+            match self.send_udp(&msg_str).await {
                 Ok(response) => {
                     // Record the received response
                     self.history
-                        .borrow_mut()
+                        .lock()
+                        .await
                         .record(MessageType::Receive, &response);
                     return Ok(response);
                 }
                 Err(e) => {
                     // Record the error
-                    self.history
-                        .borrow_mut()
-                        .record_error(&e.to_string());
+                    self.history.lock().await.record_error(&e.to_string());
                     last_error = Some(e);
                     if attempt < Self::MAX_RETRIES {
                         let delay_idx = (attempt as usize).min(Self::RETRY_DELAYS_MS.len() - 1);
-                        std::thread::sleep(Duration::from_millis(Self::RETRY_DELAYS_MS[delay_idx]));
+                        sleep(Duration::from_millis(Self::RETRY_DELAYS_MS[delay_idx])).await;
                     }
                 }
             }
@@ -483,28 +512,36 @@ impl Light {
         Err(last_error.unwrap_or(Error::NoAttribute))
     }
 
-    fn send_udp(&self, msg: &str) -> Result<Value> {
-        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::socket("bind", e))?;
-
-        let timeout = Some(Duration::from_millis(Self::TIMEOUT_MS));
-        socket
-            .set_write_timeout(timeout)
-            .map_err(|e| Error::socket("set_write_timeout", e))?;
-        socket
-            .set_read_timeout(timeout)
-            .map_err(|e| Error::socket("set_read_timeout", e))?;
+    async fn send_udp(&self, msg: &str) -> Result<Value> {
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .map_err(|e| Error::socket("bind", e))?;
 
         socket
             .connect(format!("{}:{}", self.ip, Self::PORT))
+            .await
             .map_err(|e| Error::socket("connect", e))?;
+
         socket
             .send(msg.as_bytes())
+            .await
             .map_err(|e| Error::socket("send", e))?;
 
         let mut buffer = [0u8; 4096];
-        let bytes = socket
-            .recv(&mut buffer)
-            .map_err(|e| Error::socket("receive", e))?;
+
+        // Use tokio's timeout for the receive operation
+        let bytes = tokio::time::timeout(
+            Duration::from_millis(Self::TIMEOUT_MS),
+            socket.recv(&mut buffer),
+        )
+        .await
+        .map_err(|_| {
+            Error::socket(
+                "receive",
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "receive timeout"),
+            )
+        })?
+        .map_err(|e| Error::socket("receive", e))?;
 
         let response = String::from_utf8(buffer[..bytes].to_vec()).map_err(Error::Utf8Decode)?;
         serde_json::from_str(&response).map_err(Error::JsonLoad)
@@ -512,7 +549,9 @@ impl Light {
 }
 
 fn parse_f32_array(config: &Value, key: &str) -> Option<Vec<f32>> {
-    config.get(key)
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect())
+    config.get(key).and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_f64().map(|f| f as f32))
+            .collect()
+    })
 }

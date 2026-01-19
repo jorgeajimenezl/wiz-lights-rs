@@ -1,10 +1,12 @@
 //! Device discovery via UDP broadcast.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use tokio::net::UdpSocket;
+use tokio::time::{Instant, timeout};
 
 use crate::errors::Error;
 use crate::light::Light;
@@ -26,7 +28,7 @@ impl DiscoveredBulb {
     /// # Examples
     ///
     /// ```ignore
-    /// let bulbs = discover_bulbs(Duration::from_secs(5))?;
+    /// let bulbs = discover_bulbs(Duration::from_secs(5)).await?;
     /// for bulb in bulbs {
     ///     let light = bulb.into_light(Some("My Light"));
     /// }
@@ -43,7 +45,7 @@ impl DiscoveredBulb {
 ///
 /// # Arguments
 ///
-/// * `timeout` - How long to wait for responses from bulbs
+/// * `discovery_timeout` - How long to wait for responses from bulbs
 ///
 /// # Examples
 ///
@@ -51,22 +53,20 @@ impl DiscoveredBulb {
 /// use std::time::Duration;
 /// use wiz_lights_rs::discover_bulbs;
 ///
-/// let bulbs = discover_bulbs(Duration::from_secs(5))?;
+/// let bulbs = discover_bulbs(Duration::from_secs(5)).await?;
 /// println!("Found {} bulbs", bulbs.len());
 /// for bulb in bulbs {
 ///     println!("  {} - {}", bulb.ip, bulb.mac);
 /// }
 /// ```
-pub fn discover_bulbs(timeout: Duration) -> Result<Vec<DiscoveredBulb>> {
-    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::socket("bind", e))?;
+pub async fn discover_bulbs(discovery_timeout: Duration) -> Result<Vec<DiscoveredBulb>> {
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| Error::socket("bind", e))?;
 
     socket
         .set_broadcast(true)
         .map_err(|e| Error::socket("set_broadcast", e))?;
-
-    socket
-        .set_read_timeout(Some(Duration::from_millis(500)))
-        .map_err(|e| Error::socket("set_read_timeout", e))?;
 
     let msg = json!({
         "method": "registration",
@@ -81,30 +81,31 @@ pub fn discover_bulbs(timeout: Duration) -> Result<Vec<DiscoveredBulb>> {
 
     socket
         .send_to(&msg_bytes, "255.255.255.255:38899")
+        .await
         .map_err(|e| Error::socket("send_to", e))?;
 
     let mut discovered: HashMap<String, DiscoveredBulb> = HashMap::new();
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut buffer = [0u8; 4096];
+    let recv_timeout = Duration::from_millis(500);
 
-    while start.elapsed() < timeout {
-        match socket.recv_from(&mut buffer) {
-            Ok((size, addr)) => {
-                if let Ok(response) = String::from_utf8(buffer[..size].to_vec()) {
-                    if let Ok(json) = serde_json::from_str::<Value>(&response) {
-                        if let Some(mac) = extract_mac(&json) {
-                            let ip = match addr {
-                                SocketAddr::V4(v4) => *v4.ip(),
-                                SocketAddr::V6(_) => continue,
-                            };
-                            discovered.insert(mac.clone(), DiscoveredBulb { ip, mac });
-                        }
-                    }
+    while start.elapsed() < discovery_timeout {
+        // Use timeout for each recv_from operation
+        match timeout(recv_timeout, socket.recv_from(&mut buffer)).await {
+            Ok(Ok((size, addr))) => {
+                if let Ok(response) = String::from_utf8(buffer[..size].to_vec())
+                    && let Ok(json) = serde_json::from_str::<Value>(&response)
+                    && let Some(mac) = extract_mac(&json)
+                {
+                    let ip = match addr {
+                        SocketAddr::V4(v4) => *v4.ip(),
+                        SocketAddr::V6(_) => continue,
+                    };
+                    discovered.insert(mac.clone(), DiscoveredBulb { ip, mac });
                 }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
-            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
-            Err(_) => break,
+            // Timeout elapsed - continue loop to check overall timeout
+            Ok(Err(_)) | Err(_) => continue,
         }
     }
 
