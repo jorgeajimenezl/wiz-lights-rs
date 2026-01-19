@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use futures::future;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -69,16 +70,28 @@ impl Room {
 
     /// Query all bulbs in this room for their current status.
     ///
-    /// This queries all lights concurrently using tokio's join_all.
-    pub async fn get_status(&mut self) -> Result<Vec<LightingResponse>> {
-        let Some(lights) = &mut self.lights else {
+    /// This queries all lights concurrently.
+    pub async fn get_status(&self) -> Result<Vec<LightingResponse>> {
+        let Some(lights) = &self.lights else {
             return Ok(Vec::new());
         };
 
+        // Create futures for concurrent execution
+        let futures: Vec<_> = lights
+            .values()
+            .map(|light| async move {
+                let ip = light.ip();
+                light.get_status().await.map(|status| LightingResponse::status(ip, status))
+            })
+            .collect();
+
+        // Execute all queries concurrently using join_all
+        let results = future::join_all(futures).await;
+
+        // Collect successful responses and return first error if any
         let mut responses = Vec::new();
-        for light in lights.values_mut() {
-            let status = light.get_status().await?;
-            responses.push(LightingResponse::status(light.ip(), status));
+        for result in results {
+            responses.push(result?);
         }
         Ok(responses)
     }
