@@ -12,52 +12,20 @@ use crate::runtime::{self, AsyncUdpSocket, Instant, UdpSocket};
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// A discovered Wiz bulb on the network.
+/// A discovered Wiz bulb.
 #[derive(Debug, Clone)]
 pub struct DiscoveredBulb {
-    /// IP address of the discovered bulb
     pub ip: Ipv4Addr,
-    /// MAC address of the discovered bulb
     pub mac: String,
 }
 
 impl DiscoveredBulb {
-    /// Convert this discovered bulb into a [`Light`] instance.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let bulbs = discover_bulbs(Duration::from_secs(5)).await?;
-    /// for bulb in bulbs {
-    ///     let light = bulb.into_light(Some("My Light"));
-    /// }
-    /// ```
     pub fn into_light(self, name: Option<&str>) -> Light {
         Light::new(self.ip, name)
     }
 }
 
-/// Discover Wiz bulbs on the local network using UDP broadcast.
-///
-/// Sends a broadcast message and collects responses from all Wiz bulbs
-/// within the specified timeout period.
-///
-/// # Arguments
-///
-/// * `discovery_timeout` - How long to wait for responses from bulbs
-///
-/// # Examples
-///
-/// ```ignore
-/// use std::time::Duration;
-/// use wiz_lights_rs::discover_bulbs;
-///
-/// let bulbs = discover_bulbs(Duration::from_secs(5)).await?;
-/// println!("Found {} bulbs", bulbs.len());
-/// for bulb in bulbs {
-///     println!("  {} - {}", bulb.ip, bulb.mac);
-/// }
-/// ```
+/// Discovers Wiz bulbs using UDP broadcast.
 pub async fn discover_bulbs(discovery_timeout: Duration) -> Result<Vec<DiscoveredBulb>> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await

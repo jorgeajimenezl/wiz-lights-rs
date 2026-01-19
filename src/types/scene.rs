@@ -4,10 +4,7 @@ use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-/// Preset lighting scenes built into Wiz bulbs.
-///
-/// Each scene produces a specific lighting effect, ranging from static colors
-/// to dynamic animations. Scene IDs correspond to the official Wiz app scenes.
+/// Preset lighting scenes with static colors or dynamic animations.
 #[derive(Debug, Serialize, Deserialize, Clone, EnumIter, PartialEq)]
 pub enum SceneMode {
     Ocean = 1,
@@ -45,28 +42,14 @@ pub enum SceneMode {
     Diwali = 33,
     Alarm = 35,
     WarmFeeling = 36,
-    /// Rhythm mode - syncs with music (requires Wiz app rhythm feature)
     Rhythm = 1000,
 }
 
 impl SceneMode {
-    /// Create a SceneMode from its numeric ID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use wiz_lights_rs::SceneMode;
-    ///
-    /// assert!(SceneMode::create(1).is_some());  // Ocean
-    /// assert!(SceneMode::create(35).is_some()); // Alarm
-    /// assert!(SceneMode::create(1000).is_some()); // Rhythm
-    /// assert!(SceneMode::create(999).is_none());
-    /// ```
     pub fn create(value: u16) -> Option<Self> {
         SceneMode::iter().find(|scene| scene.clone() as u16 == value)
     }
 
-    /// Get the scene ID as u16.
     pub fn id(&self) -> u16 {
         self.clone() as u16
     }

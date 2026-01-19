@@ -77,7 +77,6 @@ impl Light {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAYS_MS: [u64; 3] = [750, 1500, 3000];
 
-    /// Create a new light with the given IP address.
     pub fn new(ip: Ipv4Addr, name: Option<&str>) -> Self {
         Light {
             ip,
@@ -87,37 +86,27 @@ impl Light {
         }
     }
 
-    /// Get the IP address of this light.
     pub fn ip(&self) -> Ipv4Addr {
         self.ip
     }
 
-    /// Get the name of this light.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
-    /// Get the last known status of this light.
     pub fn status(&self) -> Option<&LightStatus> {
         self.status.as_ref()
     }
 
-    /// Get a copy of the message history for this light.
-    ///
-    /// This is an async operation because the history is protected by a mutex.
     pub async fn history(&self) -> MessageHistory {
         self.history.lock().await.clone()
     }
 
-    /// Clear the message history.
     pub async fn clear_history(&self) {
         self.history.lock().await.clear();
     }
 
-    /// Get diagnostics information for this light.
-    ///
-    /// Returns a JSON value containing current state, configuration,
-    /// and history information useful for debugging.
+    /// Returns diagnostics including state, configuration, and history.
     pub async fn diagnostics(&self) -> Value {
         let mut diag = json!({
             "ip": self.ip.to_string(),
@@ -181,20 +170,14 @@ impl Light {
         diag
     }
 
-    /// Query the bulb for its current status.
-    ///
-    /// This performs a live network query, unlike [`status()`](Self::status)
-    /// which returns cached data.
+    /// Queries the bulb for current status (live network call).
     pub async fn get_status(&self) -> Result<LightStatus> {
         let resp = self.send_command(&json!({"method": "getPilot"})).await?;
         let status: BulbStatus = serde_json::from_value(resp).map_err(Error::JsonLoad)?;
         Ok(LightStatus::from(&status))
     }
 
-    /// Apply lighting settings to this bulb.
-    ///
-    /// Returns a response that can be passed to [`process_reply`](Self::process_reply)
-    /// to update the cached state.
+    /// Applies lighting settings from a payload.
     pub async fn set(&self, payload: &Payload) -> Result<LightingResponse> {
         if !payload.is_valid() {
             return Err(Error::NoAttribute);
@@ -212,7 +195,6 @@ impl Light {
         Ok(LightingResponse::payload(self.ip, payload.clone()))
     }
 
-    /// Set the power state of this light.
     pub async fn set_power(&self, power: &PowerMode) -> Result<LightingResponse> {
         match power {
             PowerMode::On => self.set_power_state(true).await,
@@ -221,9 +203,6 @@ impl Light {
         }
     }
 
-    /// Toggle the light on/off.
-    ///
-    /// Queries current state and switches to the opposite.
     pub async fn toggle(&self) -> Result<LightingResponse> {
         let status = self.get_status().await?;
         if status.emitting() {
@@ -233,17 +212,13 @@ impl Light {
         }
     }
 
-    /// Factory reset the bulb.
-    ///
-    /// **Warning**: This resets all settings including WiFi configuration.
+    /// Factory resets the bulb (including WiFi configuration).
     pub async fn reset(&self) -> Result<()> {
         self.send_command(&json!({"method": "reset"})).await?;
         Ok(())
     }
 
-    /// Get the current power consumption in watts.
-    ///
-    /// Not all bulbs support this feature.
+    /// Returns power consumption in watts (if supported).
     pub async fn get_power(&self) -> Result<Option<f32>> {
         let resp = self.send_command(&json!({"method": "getPower"})).await?;
         Ok(resp
@@ -253,7 +228,6 @@ impl Light {
             .map(|p| p as f32))
     }
 
-    /// Get the system configuration of the bulb.
     pub async fn get_system_config(&self) -> Result<SystemConfig> {
         let resp = self
             .send_command(&json!({"method": "getSystemConfig"}))
@@ -262,7 +236,6 @@ impl Light {
         Ok(config.result)
     }
 
-    /// Get the user configuration of the bulb.
     pub async fn get_user_config(&self) -> Result<Value> {
         let resp = self
             .send_command(&json!({"method": "getUserConfig"}))
@@ -270,9 +243,7 @@ impl Light {
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 
-    /// Get the model configuration of the bulb.
-    ///
-    /// Only available on firmware >= 1.22.
+    /// Returns model configuration (firmware >= 1.22).
     pub async fn get_model_config(&self) -> Result<Value> {
         let resp = self
             .send_command(&json!({"method": "getModelConfig"}))
@@ -280,7 +251,6 @@ impl Light {
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 
-    /// Detect the bulb type and capabilities.
     pub async fn get_bulb_type(&self) -> Result<BulbType> {
         let config = self.get_system_config().await?;
         let module_name = config.module_name.as_deref().unwrap_or("Unknown");
@@ -288,13 +258,11 @@ impl Light {
         Ok(BulbType::from_module_name(module_name, fw_version))
     }
 
-    /// Get the white range from the user configuration.
     pub async fn get_white_range(&self) -> Result<Option<WhiteRange>> {
         let config = self.get_user_config().await?;
         Ok(parse_f32_array(&config, "whiteRange").map(WhiteRange::new))
     }
 
-    /// Get the extended white range (CCT range) from the bulb.
     pub async fn get_extended_white_range(&self) -> Result<Option<ExtendedWhiteRange>> {
         // Try model config first (FW >= 1.22), then user config
         let model = self.get_model_config().await?;
@@ -312,7 +280,6 @@ impl Light {
         Ok(None)
     }
 
-    /// Get the fan speed range (max speed) for fan-equipped fixtures.
     pub async fn get_fan_speed_range(&self) -> Result<Option<u8>> {
         let model = self.get_model_config().await?;
         if let Some(v) = model.get("fanSpeed").and_then(|v| v.as_u64()) {
@@ -325,18 +292,6 @@ impl Light {
             .map(|v| v as u8))
     }
 
-    // ==================== Fan Control Methods ====================
-
-    /// Set the fan state (on/off) and optional settings.
-    ///
-    /// This is the primary method for controlling fan-equipped fixtures.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Fan power state (on/off)
-    /// * `mode` - Optional fan mode (normal/breeze)
-    /// * `speed` - Optional fan speed
-    /// * `direction` - Optional rotation direction (forward/reverse)
     pub async fn fan_set_state(
         &self,
         state: Option<FanState>,
@@ -369,9 +324,6 @@ impl Light {
         Ok(LightingResponse::payload(self.ip, payload))
     }
 
-    /// Turn the fan on.
-    ///
-    /// Optionally specify mode and speed.
     pub async fn fan_turn_on(
         &self,
         mode: Option<FanMode>,
@@ -381,15 +333,11 @@ impl Light {
             .await
     }
 
-    /// Turn the fan off.
     pub async fn fan_turn_off(&self) -> Result<LightingResponse> {
         self.fan_set_state(Some(FanState::Off), None, None, None)
             .await
     }
 
-    /// Toggle the fan on/off.
-    ///
-    /// Queries current state and switches to the opposite.
     pub async fn fan_toggle(&self) -> Result<LightingResponse> {
         // Check fan state from the raw response
         let resp = self.send_command(&json!({"method": "getPilot"})).await?;
@@ -407,24 +355,18 @@ impl Light {
         }
     }
 
-    /// Set the fan speed.
     pub async fn set_fan_speed(&self, speed: FanSpeed) -> Result<LightingResponse> {
         self.fan_set_state(None, None, Some(speed), None).await
     }
 
-    /// Set the fan mode (normal or breeze).
     pub async fn set_fan_mode(&self, mode: FanMode) -> Result<LightingResponse> {
         self.fan_set_state(None, Some(mode), None, None).await
     }
 
-    /// Set the fan rotation direction.
     pub async fn set_fan_direction(&self, direction: FanDirection) -> Result<LightingResponse> {
         self.fan_set_state(None, None, None, Some(direction)).await
     }
 
-    /// Update the cached status from a lighting response.
-    ///
-    /// Returns `true` if this light was updated.
     pub fn process_reply(&mut self, resp: &LightingResponse) -> bool {
         if resp.ip != self.ip {
             return false;
@@ -438,7 +380,6 @@ impl Light {
         true
     }
 
-    /// Update non-lighting attributes from another Light.
     pub(crate) fn update(&mut self, other: &Self) -> bool {
         let mut changed = false;
         if self.name != other.name {
