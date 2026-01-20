@@ -10,6 +10,7 @@ use std::net::Ipv4Addr;
 use std::time::Duration;
 use wiz_lights_rs::{
     Brightness, Color, Kelvin, Light, Payload, PowerMode, SceneMode, discover_bulbs,
+    push::PushManager,
 };
 
 #[derive(Parser)]
@@ -85,6 +86,13 @@ enum Commands {
 
     /// Get detailed diagnostics
     Diagnostics,
+
+    /// Listen for push notifications from a light
+    Listen {
+        /// Local IP address for registration (IP of this machine on the network)
+        #[arg(short, long)]
+        local_ip: Ipv4Addr,
+    },
 }
 
 #[tokio::main]
@@ -289,6 +297,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Getting diagnostics for light at {}...", ip);
                     let diag = light.diagnostics().await;
                     println!("\nDiagnostics:\n{}", serde_json::to_string_pretty(&diag)?);
+                }
+
+                Commands::Listen { local_ip } => {
+                    println!("Setting up push notification listener for light at {}...", ip);
+                    println!("Local IP: {}", local_ip);
+
+                    // Get the light's MAC address first
+                    let config = light.get_system_config().await?;
+                    let mac = config.mac.clone();
+                    println!("Light MAC: {}\n", mac);
+
+                    // Create and start push manager
+                    let push_manager = PushManager::new();
+
+                    // Subscribe to notifications from this light
+                    let display_mac = mac.to_string();
+                    push_manager.subscribe(&mac, move |_mac, params| {
+                        println!("[{}] State update received:", display_mac);
+                        println!("{}\n", serde_json::to_string_pretty(params).unwrap_or_else(|_| format!("{:?}", params)));
+                    }).await;
+
+                    // Start listening for push notifications
+                    push_manager.start(local_ip).await?;
+                    println!("Push manager started on port 38900");
+
+                    // Register with the bulb
+                    push_manager.register_bulb(ip).await?;
+                    println!("Registered with light at {}", ip);
+                    println!("\nListening for push notifications... (Press Ctrl+C to stop)\n");
+
+                    // Keep the program running
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
             }
         }

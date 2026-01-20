@@ -62,7 +62,12 @@ cargo run --example wiz_cli -- --ip 192.168.1.100 reset
 
 # Get detailed diagnostics
 cargo run --example wiz_cli -- --ip 192.168.1.100 diagnostics
+
+# Listen for push notifications from a light
+cargo run --example wiz_cli -- --ip 192.168.1.100 listen --local-ip 192.168.1.50
 ```
+
+The `listen` command requires both the light's IP address (`--ip`) and your machine's local IP address (`--local-ip`). It will continuously monitor for state changes from the light and display them in real-time. Press Ctrl+C to stop listening.
 
 **Available scenes:**
 Ocean, Romance, Sunset, Party, Fireplace, Cozy, Forest, PastelColors, WakeUp, Bedtime, WarmWhite, Daylight, CoolWhite, NightLight, Focus, Relax, TrueColors, TvTime, Plantgrowth, Spring, Summer, Fall, Deepdive, Jungle, Mojito, Club, Christmas, Halloween, Candlelight, GoldenWhite, Pulse, Steampunk, Diwali, Alarm, WarmFeeling, Rhythm
