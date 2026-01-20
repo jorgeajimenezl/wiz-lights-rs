@@ -9,7 +9,7 @@ description = "A Rust library for controlling Wiz smart lights."
 homepage = "https://github.com/jorgeajimenezl/wiz-lights-rs"
 repository = "https://github.com/jorgeajimenezl/wiz-lights-rs"
 readme = "README.md"
-keywords = ["wiz", "smart lights", "iot", "home automation"]
+keywords = ["wiz", "light", "iot", "home automation"]
 exclude = [
     ".github/*",
     "CLAUDE.md",
